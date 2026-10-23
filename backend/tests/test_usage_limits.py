@@ -61,6 +61,16 @@ def test_cached_briefing_is_unlimited_but_refresh_is_capped(tmp_path, monkeypatc
     assert refreshes == [200, 200, 429]
 
 
+def test_other_true_spellings_of_refresh_are_capped_too(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    ip = {"x-forwarded-for": "203.0.113.11"}
+    statuses = [
+        client.get(f"/api/dashboard/briefing?refresh={value}", headers=ip).status_code
+        for value in ("TRUE", "yes", "On")
+    ]
+    assert statuses == [200, 200, 429]
+
+
 def test_writes_have_a_per_ip_budget(tmp_path, monkeypatch):
     monkeypatch.setattr(usage_limits, "WRITES_IP_PER_HOUR", 2)
     client = _client(tmp_path, monkeypatch)

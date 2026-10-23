@@ -93,7 +93,9 @@ def _limit_for(request: Request) -> tuple[str, int, int | None] | None:
     method, path = request.method, request.url.path
     if (method, path) in COSTLY_ROUTES:
         return COSTLY_ROUTES[(method, path)]
-    if method == "GET" and path == "/api/dashboard/briefing" and request.query_params.get("refresh") in ("true", "1"):
+    # Match every spelling FastAPI's bool parsing accepts, so "TRUE" or "yes" cannot skip the cap.
+    refresh = request.query_params.get("refresh", "").strip().lower()
+    if method == "GET" and path == "/api/dashboard/briefing" and refresh in {"1", "true", "t", "yes", "y", "on"}:
         return BRIEFING_REFRESH
     # Chat has its own limit inside the route so the UI gets an assistant reply.
     if method in ("POST", "PUT", "PATCH", "DELETE") and path.startswith("/api/") and not path.startswith("/api/assistant/chat"):
