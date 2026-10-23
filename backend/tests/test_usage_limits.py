@@ -30,7 +30,7 @@ def _client(tmp_path, monkeypatch) -> TestClient:
 
 def test_research_run_is_limited_per_ip(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
-    ip = {"x-forwarded-for": "203.0.113.7"}
+    ip = {"x-real-ip": "203.0.113.7"}
     assert client.post("/api/research/run", headers=ip).status_code == 200
     blocked = client.post("/api/research/run", headers=ip)
     assert blocked.status_code == 429
@@ -40,22 +40,25 @@ def test_research_run_is_limited_per_ip(tmp_path, monkeypatch):
 def test_daily_cap_applies_across_visitors(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     statuses = [
-        client.post("/api/research/run", headers={"x-forwarded-for": f"203.0.113.{n}"}).status_code
+        client.post("/api/research/run", headers={"x-real-ip": f"203.0.113.{n}"}).status_code
         for n in range(5)
     ]
     assert statuses == [200, 200, 200, 429, 429]
 
 
-def test_forged_forwarded_for_prefix_does_not_reset_the_budget(tmp_path, monkeypatch):
+def test_forwarded_for_does_not_pick_the_bucket(tmp_path, monkeypatch):
+    # Railway's rightmost X-Forwarded-For entry is its edge node, shared by many visitors.
     client = _client(tmp_path, monkeypatch)
-    assert client.post("/api/research/run", headers={"x-forwarded-for": "1.1.1.1, 203.0.113.9"}).status_code == 200
-    forged = client.post("/api/research/run", headers={"x-forwarded-for": "2.2.2.2, 203.0.113.9"})
-    assert forged.status_code == 429
+    edge = "152.233.15.123"
+    first = {"x-real-ip": "203.0.113.20", "x-forwarded-for": f"203.0.113.20, {edge}"}
+    second = {"x-real-ip": "203.0.113.21", "x-forwarded-for": f"203.0.113.21, {edge}"}
+    assert client.post("/api/research/run", headers=first).status_code == 200
+    assert client.post("/api/research/run", headers=second).status_code == 200
 
 
 def test_cached_briefing_is_unlimited_but_refresh_is_capped(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
-    ip = {"x-forwarded-for": "203.0.113.8"}
+    ip = {"x-real-ip": "203.0.113.8"}
     assert all(client.get("/api/dashboard/briefing", headers=ip).status_code == 200 for _ in range(10))
     refreshes = [client.get("/api/dashboard/briefing?refresh=true", headers=ip).status_code for _ in range(3)]
     assert refreshes == [200, 200, 429]
@@ -63,7 +66,7 @@ def test_cached_briefing_is_unlimited_but_refresh_is_capped(tmp_path, monkeypatc
 
 def test_other_true_spellings_of_refresh_are_capped_too(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
-    ip = {"x-forwarded-for": "203.0.113.11"}
+    ip = {"x-real-ip": "203.0.113.11"}
     statuses = [
         client.get(f"/api/dashboard/briefing?refresh={value}", headers=ip).status_code
         for value in ("TRUE", "yes", "On")
@@ -74,6 +77,6 @@ def test_other_true_spellings_of_refresh_are_capped_too(tmp_path, monkeypatch):
 def test_writes_have_a_per_ip_budget(tmp_path, monkeypatch):
     monkeypatch.setattr(usage_limits, "WRITES_IP_PER_HOUR", 2)
     client = _client(tmp_path, monkeypatch)
-    ip = {"x-forwarded-for": "203.0.113.10"}
+    ip = {"x-real-ip": "203.0.113.10"}
     statuses = [client.put("/api/settings/models", headers=ip).status_code for _ in range(3)]
     assert statuses == [200, 200, 429]

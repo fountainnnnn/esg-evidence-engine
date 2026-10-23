@@ -43,12 +43,12 @@ _windows: dict[tuple[str, str], tuple[float, int]] = {}
 
 
 def client_ip(request: Request) -> str:
-    """Railway's edge appends the client address to X-Forwarded-For, so the
-    rightmost entry is the one a client cannot forge."""
-    forwarded = request.headers.get("x-forwarded-for", "")
-    last = forwarded.split(",")[-1].strip()
-    if last:
-        return last
+    """Railway's edge overwrites X-Real-IP with the client address, so a client
+    cannot forge it (measured 2026-10-23). The rightmost X-Forwarded-For entry is
+    the edge node itself, not the visitor, so X-Forwarded-For is not used."""
+    real_ip = request.headers.get("x-real-ip", "").strip()
+    if real_ip:
+        return real_ip
     return request.client.host if request.client else "unknown"
 
 
