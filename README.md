@@ -36,6 +36,28 @@ Open the frontend at `http://localhost:5173`.
 
 The frontend proxies `/api/*` requests to `http://localhost:8000`.
 
+## Usage limits
+
+The deployment is public, so the endpoints that spend money are budgeted
+(`backend/app/usage_limits.py`). The dashboard and precomputed data are not.
+
+| Action | Per visitor (IP) | Whole site |
+|---|---|---|
+| AI assistant message | 20 per hour | 100 per day |
+| Research run | 1 per hour | 3 per day |
+| Live company news (`/api/esg-news/company`) | 20 per hour | 200 per day |
+| Briefing regeneration (`?refresh=true`) | 2 per hour | 3 per day |
+| Scraper endpoint test | 5 per hour | none |
+| Any other write (`POST`/`PUT`/`PATCH`/`DELETE`) | 120 per hour | none |
+
+Over a limit the API returns `429` with `Retry-After`; the assistant instead
+replies with a message saying the limit was reached. Each limit can be changed
+with an environment variable (`AGENT_DAILY_LIMIT`, `AGENT_IP_PER_HOUR`,
+`RESEARCH_IP_PER_HOUR`, `RESEARCH_DAILY_LIMIT`, `NEWS_IP_PER_HOUR`,
+`NEWS_DAILY_LIMIT`, `BRIEFING_REFRESH_IP_PER_HOUR`,
+`BRIEFING_REFRESH_DAILY_LIMIT`, `SCRAPE_TEST_IP_PER_HOUR`,
+`WRITES_IP_PER_HOUR`).
+
 ## Features
 
 - **AI Assistant** — chat sessions, streaming research agent, source-backed PDF reports (`/api/assistant/*`).

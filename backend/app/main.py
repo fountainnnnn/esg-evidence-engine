@@ -16,7 +16,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
@@ -57,6 +57,7 @@ from .chat_history import (
     ChatSessionSummary,
     CreateChatSessionRequest,
 )
+from .usage_limits import CHAT_IP_PER_HOUR, allow_ip, client_ip, usage_limit_middleware
 from .feedback import (
     FeedbackCreate,
     FeedbackRecord,
@@ -139,6 +140,7 @@ class SourceUpsertRequest(BaseModel):
 
 
 app = FastAPI(title="PolyFintech 2026 API", version="1.0.0")
+app.middleware("http")(usage_limit_middleware)
 agent = OpenRouterAgent()
 chat_history = ChatHistoryStore()
 feedback_store = FeedbackStore()
@@ -164,9 +166,11 @@ AGENT_DAILY_LIMIT = int(os.environ.get("AGENT_DAILY_LIMIT", "100"))
 _RATE_FILE = Path(__file__).resolve().parents[2] / "cache" / "agent" / "agent_rate.json"
 
 
-def _agent_rate_allow() -> bool:
-    """Count one agent message against today's global cap. Returns False once the
-    daily limit is reached, so the costly LLM call is skipped."""
+def _agent_rate_allow(request: Request) -> bool:
+    """Count one agent message against this visitor's hourly budget and today's
+    global cap. Returns False once either is spent, so the costly LLM call is skipped."""
+    if not allow_ip("chat", client_ip(request), CHAT_IP_PER_HOUR):
+        return False
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     try:
         data = json.loads(_RATE_FILE.read_text("utf-8")) if _RATE_FILE.exists() else {}
@@ -187,9 +191,10 @@ def _agent_rate_allow() -> bool:
 
 def _rate_limited_response() -> AssistantResponse:
     note = (
-        f"The shared daily limit of {AGENT_DAILY_LIMIT} AI messages has been "
-        "reached. The dashboard and all data are still fully available — please "
-        "try the assistant again tomorrow."
+        f"The AI assistant limit has been reached ({CHAT_IP_PER_HOUR} messages per "
+        f"visitor per hour, {AGENT_DAILY_LIMIT} per day across the site). The "
+        "dashboard and all data are still fully available — please try the "
+        "assistant again later."
     )
     return AssistantResponse(
         message=ChatMessage(role="assistant", content=note),
@@ -732,8 +737,8 @@ def delete_assistant_session(session_id: str) -> Response:
 
 
 @app.post("/api/assistant/chat", response_model=AssistantResponse)
-async def assistant_chat(request: AssistantRequest) -> AssistantResponse:
-    if not _agent_rate_allow():
+async def assistant_chat(request: AssistantRequest, http_request: Request) -> AssistantResponse:
+    if not _agent_rate_allow(http_request):
         return _rate_limited_response()
     session = chat_history.ensure_session(request.session_id)
     effective_request = request.model_copy(update={"session_id": session.id})
@@ -748,8 +753,8 @@ async def assistant_chat(request: AssistantRequest) -> AssistantResponse:
 
 
 @app.post("/api/assistant/chat/stream")
-async def assistant_chat_stream(request: AssistantRequest) -> StreamingResponse:
-    if not _agent_rate_allow():
+async def assistant_chat_stream(request: AssistantRequest, http_request: Request) -> StreamingResponse:
+    if not _agent_rate_allow(http_request):
         async def limited():
             yield json.dumps(
                 {"type": "final", "response": _rate_limited_response().model_dump(by_alias=True)},
